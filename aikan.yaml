@@ -1,0 +1,299 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "My Final project"
+Parameters:
+  InstanceTypeParameter:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+
+  VPCCIDRParameter:
+    Type: String
+    Description: CIDR block for the VPC
+    Default: 10.5.0.0/16
+    ConstraintDescription: Must be a valid CIDR block
+
+Mappings:
+  AmiMappings:
+    us-east-1:
+      AmiId: ami-0c101f26f147fa7fd
+    us-west-2:
+      AmiId: ami-0a70b9d193ae8a799
+
+Resources:
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDRParameter
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: Owner
+        Value: Aikan
+
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Owner
+        Value: Aikan
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref MyInternetGateway
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      AvailabilityZone: "us-east-1a"
+      CidrBlock: 10.5.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: Owner
+        Value: Aikan
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      AvailabilityZone: "us-east-1b"
+      CidrBlock: 10.5.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: Owner
+        Value: Aikan
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      AvailabilityZone: "us-east-1a"
+      CidrBlock: 10.5.3.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+      - Key: Owner
+        Value: Aikan
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      AvailabilityZone: "us-east-1b"
+      CidrBlock: 10.5.4.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+      - Key: Owner
+        Value: Aikan
+
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties: 
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  MyRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+      - Key: Owner
+        Value: Aikan
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref MyRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+
+  MyPublicSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref MyRouteTable
+
+  MyPublicSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref MyRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Owner
+          Value: Aikan
+
+  DefaultPrivateRoute:
+      Type: AWS::EC2::Route
+      Properties:
+        RouteTableId: !Ref PrivateRouteTable
+        DestinationCidrBlock: 0.0.0.0/0
+        NatGatewayId: !Ref NatGateway
+    
+  MyPrivateSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet1
+    
+  MyPrivateSubnet2RouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet2
+
+  MySecurityGroupALB:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: Aikan-sg-alb
+      GroupDescription: Allow HTTP access from ALB
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Owner
+        Value: Aikan
+
+  MySecurityGroupASG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: Aikan-sg-asg
+      GroupDescription: Allow HTTP access from ASG
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+      - SourceSecurityGroupId: !GetAtt MySecurityGroupALB.GroupId
+        IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+      Tags:
+      - Key: Owner
+        Value: Aikan
+
+  MyKeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: Keyforproject
+
+  MyLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: MyFinalLaunchTemplate
+      LaunchTemplateData:
+        ImageId: !FindInMap [AmiMappings, !Ref "AWS::Region", AmiId]
+        InstanceType: !Ref InstanceTypeParameter
+        KeyName: !Ref MyKeyPair
+        SecurityGroupIds:
+        SecurityGroupIds: 
+        - !GetAtt MySecurityGroupASG.GroupId
+        UserData:
+          Fn::Base64: |
+            #!/bin/bash
+            yum update -y
+            yum install -y httpd
+            echo "<!DOCTYPE html>
+            <html>
+            <head>
+              <title>Привет от CloudFormation!</title>
+              <style>
+                body {
+                  font-family: Arial, sans-serif; /* Шрифт */
+                  background-color: #f9f9f9; /* Светлый фон */
+                  color: #333; /* Цвет текста */
+                  text-align: center; /* Выравнивание текста по центру */
+                  margin: 0; /* Убираем отступы по умолчанию */
+                  padding: 0; /* Убираем внутренние отступы по умолчанию */
+                }
+
+                h1 {
+                  color: #007bff; /* Цвет заголовка */
+                }
+
+                p {
+                  font-size: 18px; /* Размер текста */
+                  margin-bottom: 20px; /* Отступ снизу */
+                }
+              </style>
+            </head>
+            <body>
+              <h1>Добро пожаловать на мой сайт, созданный с помощью AWS CloudFormation!</h1>
+              <p>Я очень рад видеть вас здесь!</p>
+            </body>
+            </html>" > /var/www/html/index.html
+            systemctl start httpd
+            systemctl enable httpd
+
+  MyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: MyFinalTargetGroup
+      TargetType: instance
+      HealthCheckPath: /index.html
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref MyVPC
+      Tags:
+      - Key: Owner
+        Value: Aikan
+
+  MyALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref MyTargetGroup
+      LoadBalancerArn: !Ref MyLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  MyLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Type: application
+      Subnets: 
+      - !Ref PublicSubnet1
+      - !Ref PublicSubnet2
+      SecurityGroups:
+      - !Ref MySecurityGroupALB
+      Tags:
+      - Key: Owner
+        Value: Aikan
+
+  MyAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DeletionPolicy: Delete
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref MyLaunchTemplate
+        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
+      HealthCheckType: ELB
+      MaxSize: '3'
+      MinSize: '1'
+      DesiredCapacity: '2'
+      VPCZoneIdentifier: 
+       - !Ref PrivateSubnet1
+       - !Ref PrivateSubnet2
+      TargetGroupARNs: 
+       - !Ref MyTargetGroup
+
+Outputs:
+  LoadBalancerDNSName:
+    Value: !GetAtt MyLoadBalancer.DNSName
+    Description: DNS name of the Application Load Balancer
